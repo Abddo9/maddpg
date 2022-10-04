@@ -38,9 +38,9 @@ class PdType(object):
         raise NotImplementedError
 
     def param_placeholder(self, prepend_shape, name=None):
-        return tf.placeholder(dtype=tf.float32, shape=prepend_shape+self.param_shape(), name=name)
+        return tf.compat.v1.placeholder(dtype=tf.float32, shape=prepend_shape+self.param_shape(), name=name)
     def sample_placeholder(self, prepend_shape, name=None):
-        return tf.placeholder(dtype=self.sample_dtype(), shape=prepend_shape+self.sample_shape(), name=name)
+        return tf.compat.v1.placeholder(dtype=self.sample_dtype(), shape=prepend_shape+self.sample_shape(), name=name)
 
 class CategoricalPdType(PdType):
     def __init__(self, ncat):
@@ -162,16 +162,16 @@ class CategoricalPd(Pd):
         z0 = U.sum(ea0, axis=1, keepdims=True)
         z1 = U.sum(ea1, axis=1, keepdims=True)
         p0 = ea0 / z0
-        return U.sum(p0 * (a0 - tf.log(z0) - a1 + tf.log(z1)), axis=1)
+        return U.sum(p0 * (a0 - tf.math.log(z0) - a1 + tf.math.log(z1)), axis=1)
     def entropy(self):
         a0 = self.logits - U.max(self.logits, axis=1, keepdims=True)
         ea0 = tf.exp(a0)
         z0 = U.sum(ea0, axis=1, keepdims=True)
         p0 = ea0 / z0
-        return U.sum(p0 * (tf.log(z0) - a0), axis=1)
+        return U.sum(p0 * (tf.math.log(z0) - a0), axis=1)
     def sample(self):
-        u = tf.random_uniform(tf.shape(self.logits))
-        return U.argmax(self.logits - tf.log(-tf.log(u)), axis=1)
+        u = tf.random.uniform(tf.shape(input=self.logits))
+        return U.argmax(self.logits - tf.math.log(-tf.math.log(u)), axis=1)
     @classmethod
     def fromflat(cls, flat):
         return cls(flat)
@@ -184,7 +184,7 @@ class SoftCategoricalPd(Pd):
     def mode(self):
         return U.softmax(self.logits, axis=-1)
     def logp(self, x):
-        return -tf.nn.softmax_cross_entropy_with_logits(logits=self.logits, labels=x)
+        return -tf.nn.softmax_cross_entropy_with_logits(logits=self.logits, labels=tf.stop_gradient(x))
     def kl(self, other):
         a0 = self.logits - U.max(self.logits, axis=1, keepdims=True)
         a1 = other.logits - U.max(other.logits, axis=1, keepdims=True)
@@ -193,16 +193,16 @@ class SoftCategoricalPd(Pd):
         z0 = U.sum(ea0, axis=1, keepdims=True)
         z1 = U.sum(ea1, axis=1, keepdims=True)
         p0 = ea0 / z0
-        return U.sum(p0 * (a0 - tf.log(z0) - a1 + tf.log(z1)), axis=1)
+        return U.sum(p0 * (a0 - tf.math.log(z0) - a1 + tf.math.log(z1)), axis=1)
     def entropy(self):
         a0 = self.logits - U.max(self.logits, axis=1, keepdims=True)
         ea0 = tf.exp(a0)
         z0 = U.sum(ea0, axis=1, keepdims=True)
         p0 = ea0 / z0
-        return U.sum(p0 * (tf.log(z0) - a0), axis=1)
+        return U.sum(p0 * (tf.math.log(z0) - a0), axis=1)
     def sample(self):
-        u = tf.random_uniform(tf.shape(self.logits))
-        return U.softmax(self.logits - tf.log(-tf.log(u)), axis=-1)  
+        u = tf.random.uniform(tf.shape(input=self.logits))
+        return U.softmax(self.logits - tf.math.log(-tf.math.log(u)), axis=-1)  
     @classmethod
     def fromflat(cls, flat):
         return cls(flat)        
@@ -272,7 +272,7 @@ class DiagGaussianPd(Pd):
         return self.mean
     def logp(self, x):
         return - 0.5 * U.sum(tf.square((x - self.mean) / self.std), axis=1) \
-               - 0.5 * np.log(2.0 * np.pi) * tf.to_float(tf.shape(x)[1]) \
+               - 0.5 * np.log(2.0 * np.pi) * tf.cast(tf.shape(input=x)[1], dtype=tf.float32) \
                - U.sum(self.logstd, axis=1)
     def kl(self, other):
         assert isinstance(other, DiagGaussianPd)
@@ -280,7 +280,7 @@ class DiagGaussianPd(Pd):
     def entropy(self):
         return U.sum(self.logstd + .5 * np.log(2.0 * np.pi * np.e), 1)
     def sample(self):
-        return self.mean + self.std * tf.random_normal(tf.shape(self.mean))
+        return self.mean + self.std * tf.random.normal(tf.shape(input=self.mean))
     @classmethod
     def fromflat(cls, flat):
         return cls(flat)
@@ -294,15 +294,15 @@ class BernoulliPd(Pd):
     def mode(self):
         return tf.round(self.ps)
     def logp(self, x):
-        return - U.sum(tf.nn.sigmoid_cross_entropy_with_logits(logits=self.logits, labels=tf.to_float(x)), axis=1)
+        return - U.sum(tf.nn.sigmoid_cross_entropy_with_logits(logits=self.logits, labels=tf.cast(x, dtype=tf.float32)), axis=1)
     def kl(self, other):
         return U.sum(tf.nn.sigmoid_cross_entropy_with_logits(logits=other.logits, labels=self.ps), axis=1) - U.sum(tf.nn.sigmoid_cross_entropy_with_logits(logits=self.logits, labels=self.ps), axis=1)
     def entropy(self):
         return U.sum(tf.nn.sigmoid_cross_entropy_with_logits(logits=self.logits, labels=self.ps), axis=1)
     def sample(self):
         p = tf.sigmoid(self.logits)
-        u = tf.random_uniform(tf.shape(p))
-        return tf.to_float(math_ops.less(u, p))
+        u = tf.random.uniform(tf.shape(input=p))
+        return tf.cast(math_ops.less(u, p), dtype=tf.float32)
     @classmethod
     def fromflat(cls, flat):
         return cls(flat)
@@ -328,4 +328,4 @@ def shape_el(v, i):
     if maybe is not None:
         return maybe
     else:
-        return tf.shape(v)[i]
+        return tf.shape(input=v)[i]
